@@ -35,7 +35,7 @@ from bs4 import BeautifulSoup
 # ── Config ───────────────────────────────────────────────────────────────────
 
 API_KEY   = os.environ["AZURE_FOUNDRY_API_KEY"]
-ENDPOINT  = "https://lre-performance-project-resource.services.ai.azure.com/openai/v1"
+ENDPOINT  = "https://lre-performance-project-resource.openai.azure.com/openai/v1"
 PRIMARY   = os.environ.get("PRIMARY_DEPLOYMENT",   "gpt-4o")
 SECONDARY = os.environ.get("SECONDARY_DEPLOYMENT", "gpt-4o-mini")
 
