@@ -1,0 +1,360 @@
+# ============================================================
+# GOAL: Integrate GitHub + LRE pipeline with Azure AI Foundry
+#       to analyze performance test results.
+# ============================================================
+# WHAT THIS DOES
+#   1. Triggers an LRE performance test run
+#   2. Waits for it to finish, fetches SLA status
+#   3. Downloads the HTML Report and Trend Report
+#   4. Sends both reports to Azure AI Foundry (gpt-4o → gpt-4o-mini fallback)
+#   5. Produces: Executive Summary, Response Time Table,
+#      Slow Transactions, Errors, Conclusion & Recommendations
+#   6. Publishes the analysis to the GitHub Job Summary + artifact
+#      (Slack publishing comes later)
+#
+# WHERE THIS FILE GOES
+#   .github/workflows/lre_ai_analysis.yml
+#
+# WHERE THE PYTHON SCRIPT GOES (used in Step: "Analyse with Azure AI Foundry")
+#   scripts/analyse_reports.py
+#
+# REQUIRED GITHUB SECRETS  (Settings → Secrets and variables → Actions → Secrets)
+#   LRE_API_KEY                         LRE Basic Auth (base64 user:pass)
+#   AZURE_FOUNDRY_API_KEY               Azure OpenAI "API key" (verified working)
+#   AZURE_FOUNDRY_DEPLOYMENT_PRIMARY    Exact deployment name, e.g. gpt-4o
+#   AZURE_FOUNDRY_DEPLOYMENT_SECONDARY  Exact deployment name, e.g. gpt-4o-mini
+#
+# NOTHING ELSE NEEDS TO BE HARDCODED — all LRE values are entered
+# when you click "Run workflow" in the GitHub Actions tab.
+# ============================================================
+
+name: LRE Performance – Azure AI Analysis
+
+on:
+  workflow_dispatch:
+    inputs:
+      lre_host:
+        description: 'LRE server URL (e.g. https://lre.edb.com)'
+        required: true
+        default: 'https://lre.edb.com'
+      lre_domain:
+        description: 'LRE Domain'
+        required: true
+        default: 'FS'
+      lre_project:
+        description: 'LRE Project name'
+        required: true
+        default: 'Payment_Initiation'
+      test_id:
+        description: 'LRE Test ID'
+        required: true
+        default: '3079'
+      test_instance_id:
+        description: 'LRE Test Instance ID'
+        required: true
+        default: '2270'
+      timeslot_minutes:
+        description: 'Timeslot duration (minutes)'
+        required: true
+        default: '30'
+      wait_seconds:
+        description: 'Seconds to wait for test to finish before fetching results'
+        required: true
+        default: '400'
+      trend_report_id:
+        description: 'LRE Trend Report ID'
+        required: true
+        default: '1109'
+
+# ============================================================
+jobs:
+  LRE_Execution_And_AI_Analysis:
+    name: Run LRE Test → Analyse with Azure AI
+    runs-on: ['self-hosted', 'linux']
+
+    env:
+      LRE_HOST:      ${{ github.event.inputs.lre_host }}
+      LRE_DOMAIN:    ${{ github.event.inputs.lre_domain }}
+      LRE_PROJECT:   ${{ github.event.inputs.lre_project }}
+      TEST_ID:       ${{ github.event.inputs.test_id }}
+      INSTANCE_ID:   ${{ github.event.inputs.test_instance_id }}
+      TIMESLOT_MINS: ${{ github.event.inputs.timeslot_minutes }}
+      WAIT_SECS:     ${{ github.event.inputs.wait_seconds }}
+      TREND_ID:      ${{ github.event.inputs.trend_report_id }}
+
+    steps:
+
+      # ── 1. Checkout repo (needed for scripts/) ────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Set up Python ───────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install requests beautifulsoup4 lxml
+
+      # ── 3. Trigger LRE test run ────────────────────────────
+      - name: Trigger test in LRE
+        id: trigger_test
+        run: |
+          echo "▶ Authenticating with LRE..."
+          curl -k -s -c cookies.txt \
+            -H "Authorization: Basic ${{ secrets.LRE_API_KEY }}" \
+            "${LRE_HOST}/loadtest/rest/authentication-point/authenticate"
+
+          echo "▶ Creating site session..."
+          curl -k -s -b cookies.txt \
+            -H "Content-Type: application/xml" \
+            "${LRE_HOST}/loadtest/rest/site-session"
+
+          echo "▶ Triggering test (TestID=${TEST_ID}, InstanceID=${INSTANCE_ID})..."
+          curl -k -s -b cookies.txt \
+            -H "Accept: application/xml" \
+            -H "Content-Type: application/xml" \
+            -d "<Run xmlns=\"http://www.hp.com/PC/REST/API\">
+                  <PostRunAction>Collate And Analyze</PostRunAction>
+                  <TestID>${TEST_ID}</TestID>
+                  <TestInstanceID>${INSTANCE_ID}</TestInstanceID>
+                  <TimeslotDuration>
+                    <Hours>0</Hours>
+                    <Minutes>${TIMESLOT_MINS}</Minutes>
+                  </TimeslotDuration>
+                  <VudsMode>false</VudsMode>
+                </Run>" \
+            "${LRE_HOST}/loadtest/rest/domains/${LRE_DOMAIN}/projects/${LRE_PROJECT}/Runs" \
+            -o package.xml
+
+          echo "▶ Trigger response:"
+          cat package.xml
+
+      # ── 4. Extract Run ID ──────────────────────────────────
+      - name: Extract Run ID
+        id: get_run_id
+        uses: mavrosxristoforos/get-xml-info@2.0
+        with:
+          xml-file: 'package.xml'
+          xpath: '//*[local-name()="Run"]/*[local-name()="ID"]'
+
+      - name: Validate Run ID
+        run: |
+          echo "✅ Run ID = ${{ steps.get_run_id.outputs.info }}"
+          if [ -z "${{ steps.get_run_id.outputs.info }}" ]; then
+            echo "❌ Run ID is empty — check package.xml above."
+            exit 1
+          fi
+
+      # ── 5. Wait for test completion ────────────────────────
+      - name: Wait for test to complete
+        run: |
+          echo "⏳ Waiting ${WAIT_SECS}s..."
+          sleep "${WAIT_SECS}s"
+
+      # ── 6. Fetch SLA status ────────────────────────────────
+      - name: Fetch SLA status
+        run: |
+          curl -k -s -c cookies.txt \
+            -H "Authorization: Basic ${{ secrets.LRE_API_KEY }}" \
+            -H "Accept: application/xml" \
+            "${LRE_HOST}/loadtest/rest/authentication-point/authenticate"
+
+          curl -k -s -b cookies.txt \
+            -H "Accept: application/xml" \
+            -H "Content-Type: application/xml" \
+            "${LRE_HOST}/loadtest/rest/domains/${LRE_DOMAIN}/projects/${LRE_PROJECT}/Runs/${{ steps.get_run_id.outputs.info }}" \
+            -o SLA.xml
+
+          echo "▶ SLA response:"
+          cat SLA.xml
+
+      - name: Extract SLA status
+        id: get_sla
+        uses: mavrosxristoforos/get-xml-info@2.0
+        with:
+          xml-file: 'SLA.xml'
+          xpath: '//*[local-name()="Run"]/*[local-name()="RunSLAStatus"]'
+
+      - name: Confirm SLA status
+        run: echo "📊 SLA Status = ${{ steps.get_sla.outputs.info }}"
+
+      # ── 7. Fetch Results XML ───────────────────────────────
+      - name: Sleep before fetching results
+        run: sleep 10s
+
+      - name: Fetch Results XML
+        run: |
+          curl -k -s -c cookies.txt \
+            -H "Authorization: Basic ${{ secrets.LRE_API_KEY }}" \
+            -H "Accept: application/xml" \
+            "${LRE_HOST}/loadtest/rest/authentication-point/authenticate"
+
+          curl -k -s -b cookies.txt \
+            -H "Accept: application/xml" \
+            -H "Content-Type: application/xml" \
+            "${LRE_HOST}/loadtest/rest/domains/${LRE_DOMAIN}/projects/${LRE_PROJECT}/Runs/${{ steps.get_run_id.outputs.info }}/Results" \
+            -o Results.xml
+
+          echo "▶ Results response:"
+          cat Results.xml
+
+      # ── 8. Extract HTML Report ID (XPath + fallback) ───────
+      - name: Extract HTML Report ID (XPath primary)
+        id: get_html_id_xpath
+        uses: mavrosxristoforos/get-xml-info@2.0
+        with:
+          xml-file: 'Results.xml'
+          xpath: '//*[local-name()="RunResult"][*[local-name()="Type" and text()="HTML REPORT"]]/*[local-name()="ID"]'
+
+      - name: Extract all Result IDs (fallback)
+        id: get_all_ids
+        if: steps.get_html_id_xpath.outputs.info == ''
+        uses: mavrosxristoforos/get-xml-info@2.0
+        with:
+          xml-file: 'Results.xml'
+          xpath: '//*[local-name()="RunResult"]/*[local-name()="ID"]'
+
+      - name: Split fallback IDs
+        id: split_ids
+        if: steps.get_html_id_xpath.outputs.info == ''
+        uses: winterjung/split@v2
+        with:
+          msg: '${{ steps.get_all_ids.outputs.info }}'
+          separator: ','
+
+      - name: Resolve final HTML Report ID
+        id: html_result_id
+        run: |
+          XPATH_ID="${{ steps.get_html_id_xpath.outputs.info }}"
+          SPLIT_ID="${{ steps.split_ids.outputs._3 }}"
+          if [ -n "$XPATH_ID" ]; then
+            echo "html_id=${XPATH_ID}" >> $GITHUB_OUTPUT
+            echo "✅ HTML ID (XPath) = ${XPATH_ID}"
+          elif [ -n "$SPLIT_ID" ]; then
+            echo "html_id=${SPLIT_ID}" >> $GITHUB_OUTPUT
+            echo "⚠️ HTML ID (fallback) = ${SPLIT_ID}"
+          else
+            echo "❌ Could not determine HTML Report ID."
+            exit 1
+          fi
+
+      # ── 9. Download HTML Report ─────────────────────────────
+      - name: Download HTML Report
+        run: |
+          curl -k -s -c cookies.txt \
+            -H "Authorization: Basic ${{ secrets.LRE_API_KEY }}" \
+            -H "Accept: application/xml" \
+            "${LRE_HOST}/loadtest/rest/authentication-point/authenticate"
+
+          curl -k -s -b cookies.txt \
+            -H "Accept: */*" \
+            -H "Accept-Encoding: gzip, deflate, br" \
+            -H "CURLOPT_ENCODING: gzip" \
+            -H "Content-Type: application/zip" \
+            -H "Authorization: Basic ${{ secrets.LRE_API_KEY }}" \
+            "${LRE_HOST}/loadtest/rest/domains/${LRE_DOMAIN}/projects/${LRE_PROJECT}/Runs/${{ steps.get_run_id.outputs.info }}/Results/${{ steps.html_result_id.outputs.html_id }}/data" \
+            -o HTML_Report.zip
+
+      - name: Unzip HTML Report
+        run: |
+          mkdir -p reports/html
+          unzip -o HTML_Report.zip -d reports/html || echo "⚠️ Unzip failed or already extracted."
+          ls -lrt reports/html/
+
+      # ── 10. Download Trend Report ────────────────────────────
+      - name: Download Trend Report
+        run: |
+          curl -k -s -c cookies.txt \
+            -H "Authorization: Basic ${{ secrets.LRE_API_KEY }}" \
+            -H "Accept: application/xml" \
+            "${LRE_HOST}/loadtest/rest/authentication-point/authenticate"
+
+          curl -k -s -b cookies.txt \
+            -H "Accept: */*" \
+            -H "Accept-Encoding: gzip, deflate, br" \
+            -H "CURLOPT_ENCODING: gzip" \
+            -H "Content-Type: application/zip" \
+            -H "Authorization: Basic ${{ secrets.LRE_API_KEY }}" \
+            "${LRE_HOST}/loadtest/rest/domains/${LRE_DOMAIN}/projects/${LRE_PROJECT}/TrendReports/${TREND_ID}/data" \
+            -o Trend_Report.zip
+
+      - name: Unzip Trend Report
+        run: |
+          mkdir -p reports/trend
+          unzip -o Trend_Report.zip -d reports/trend || echo "⚠️ Unzip failed — may already be HTML/PDF."
+          ls -lrt reports/trend/
+
+      # ── 11. Analyse with Azure AI Foundry ────────────────────
+      - name: Analyse reports with Azure AI Foundry
+        id: ai_analysis
+        env:
+          AZURE_FOUNDRY_API_KEY:    ${{ secrets.AZURE_FOUNDRY_API_KEY }}
+          PRIMARY_DEPLOYMENT:       ${{ secrets.AZURE_FOUNDRY_DEPLOYMENT_PRIMARY }}
+          SECONDARY_DEPLOYMENT:     ${{ secrets.AZURE_FOUNDRY_DEPLOYMENT_SECONDARY }}
+          SLA_STATUS:               ${{ steps.get_sla.outputs.info }}
+          RUN_ID:                   ${{ steps.get_run_id.outputs.info }}
+          HTML_REPORT_DIR:          reports/html
+          TREND_REPORT_DIR:         reports/trend
+          GITHUB_RUN_NUMBER:        ${{ github.run_number }}
+        run: python scripts/analyse_reports.py
+
+      # ── 12. Print analysis in logs ───────────────────────────
+      - name: Print analysis to logs
+        run: |
+          echo "=================================================="
+          echo "📊 LRE PERFORMANCE ANALYSIS"
+          echo "=================================================="
+          cat analysis_output/summary.md
+          echo "=================================================="
+
+      # ── 13. Publish to GitHub Job Summary ────────────────────
+      - name: Write analysis to GitHub Job Summary
+        run: |
+          echo "## 📊 LRE Performance Analysis – Run #${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| LRE Run ID | \`${{ steps.get_run_id.outputs.info }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| SLA Status | ${{ steps.get_sla.outputs.info }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Test ID | \`${TEST_ID}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Project | \`${LRE_PROJECT}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          cat analysis_output/summary.md >> $GITHUB_STEP_SUMMARY
+
+      # ── 14. Upload all artefacts ─────────────────────────────
+      - name: Upload HTML Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HTMLReport-${{ github.run_number }}
+          path: HTML_Report.zip
+
+      - name: Upload Trend Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrendReport-${{ github.run_number }}
+          path: Trend_Report.zip
+
+      - name: Upload AI Analysis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Analysis-${{ github.run_number }}
+          path: analysis_output/
+          retention-days: 30
+
+      - name: Upload raw LRE XMLs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LRE-XMLs-${{ github.run_number }}
+          path: |
+            package.xml
+            SLA.xml
+            Results.xml
+          retention-days: 14
