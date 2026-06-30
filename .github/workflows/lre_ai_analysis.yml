@@ -36,35 +36,27 @@ on:
       lre_host:
         description: 'LRE server URL (e.g. https://lre.edb.com)'
         required: true
-        default: 'https://lre.edb.com'
       lre_domain:
-        description: 'LRE Domain'
+        description: 'LRE Domain (e.g. FS)'
         required: true
-        default: 'FS'
       lre_project:
-        description: 'LRE Project name'
+        description: 'LRE Project name (e.g. Payment_Initiation)'
         required: true
-        default: 'Payment_Initiation'
       test_id:
         description: 'LRE Test ID'
         required: true
-        default: '3079'
       test_instance_id:
         description: 'LRE Test Instance ID'
         required: true
-        default: '2270'
       timeslot_minutes:
         description: 'Timeslot duration (minutes)'
         required: true
-        default: '30'
       wait_seconds:
         description: 'Seconds to wait for test to finish before fetching results'
         required: true
-        default: '400'
       trend_report_id:
         description: 'LRE Trend Report ID'
         required: true
-        default: '1109'
 
 # ============================================================
 jobs:
