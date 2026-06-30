@@ -1,0 +1,35 @@
+name: Test Azure OpenAI Connection
+
+on:
+  workflow_dispatch:   # manual trigger only — click "Run workflow" in GitHub UI
+
+jobs:
+  test-connection:
+    name: Verify Azure Models are Connected
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+
+      # ── 1. Checkout repository ────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Set up Python ──────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ── 3. Install dependencies ───────────────────────────
+      - name: Install dependencies
+        run: pip install requests
+
+      # ── 4. Run connection test script ─────────────────────
+      - name: Run Azure connection test
+        env:
+          AZURE_API_KEY:       ${{ secrets.AZURE_FOUNDRY_API_KEY }}
+          AZURE_ENDPOINT:      "https://lre-performance-project-resource.openai.azure.com/openai/v1"
+          PRIMARY_DEPLOYMENT:  ${{ secrets.AZURE_FOUNDRY_DEPLOYMENT_PRIMARY }}
+          SECONDARY_DEPLOYMENT: ${{ secrets.AZURE_FOUNDRY_DEPLOYMENT_SECONDARY }}
+        run: python scripts/test_azure_connection.py
