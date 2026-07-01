@@ -18,12 +18,12 @@ on:
       test_id:
         description: 'Test ID to look up instances for'
         required: true
-        default: '4026'
+        default: '4626'
 
 jobs:
   find_instance_id:
     name: List Test Instances
-    runs-on: ['self-hosted', 'linux']
+    runs-on: ubuntu-latest
 
     steps:
       - name: Authenticate and fetch test instances
