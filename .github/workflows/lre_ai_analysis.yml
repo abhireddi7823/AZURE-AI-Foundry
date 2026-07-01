@@ -29,7 +29,7 @@ jobs:
           AZURE_FOUNDRY_DEPLOYMENT_SECONDARY: ${{ secrets.AZURE_FOUNDRY_DEPLOYMENT_SECONDARY }}
 
           LRE_API_KEY: ${{ secrets.LRE_API_KEY }}
-          LRE_HOST: https://lre.edb.com
+          LRE_HOST: https://lre.edb.com/loadtest/rest/domains
 
         run: |
           python scripts/analyse_reports.py
