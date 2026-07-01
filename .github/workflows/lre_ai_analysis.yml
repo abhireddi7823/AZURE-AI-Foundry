@@ -1,382 +1,68 @@
-# ============================================================
-# LRE Performance – GitHub + Azure AI Foundry Integration
-# ============================================================
-# Same approach as teammate's workflow but:
-#   - Values entered via form (not hardcoded)
-#   - Azure AI Foundry analyses the reports
-#   - Results published to GitHub Job Summary
-#   - No Slack (coming later)
-#
-# REQUIRED GITHUB SECRETS
-# ──────────────────────────────────────────────────────────
-#   LRE_API_KEY                         LRE Basic Auth (base64 user:pass)
-#   AZURE_FOUNDRY_API_KEY               Azure OpenAI API key (verified ✅)
-#   AZURE_FOUNDRY_DEPLOYMENT_PRIMARY    e.g. gpt-4o (verified ✅)
-#   AZURE_FOUNDRY_DEPLOYMENT_SECONDARY  e.g. gpt-4o-mini (verified ✅)
-#
-# FILE LOCATION
-#   .github/workflows/lre_ai_analysis.yml
-# ============================================================
-
-name: LRE Performance – Azure AI Analysis
+name: LRE AI Analysis
 
 on:
-  workflow_dispatch:
-    inputs:
-      lre_host:
-        description: 'LRE Server URL'
-        required: true
-        default: 'https://lre.edb.com'
-      lre_domain:
-        description: 'LRE Domain'
-        required: true
-        default: 'FS'
-      lre_project:
-        description: 'LRE Project'
-        required: true
-        default: 'Payment_Initiation'
-      test_id:
-        description: 'LRE Test ID'
-        required: true
-        default: '4626'
-      test_instance_id:
-        description: 'LRE Test Instance ID'
-        required: true
-        default: '3291'
-      timeslot_minutes:
-        description: 'Timeslot duration (minutes)'
-        required: true
-        default: '30'
-      wait_seconds:
-        description: 'Seconds to wait for test to finish'
-        required: true
-        default: '400'
-      trend_report_id:
-        description: 'LRE Trend Report ID (leave blank if not available)'
-        required: false
-        default: ''
+workflow_dispatch:
+inputs:
+lre_host:
+description: LRE Host
+required: true
+default: https://lre.edb.com
+
+```
+  lre_domain:
+    description: LRE Domain
+    required: true
+    default: FS
+
+  lre_project:
+    description: LRE Project
+    required: true
+    default: Payment_Initiation
+
+  run_id:
+    description: Existing LRE Run ID
+    required: true
+```
 
 jobs:
-  LRE_Execution:
-    name: Run LRE Test + Azure AI Analysis
-    runs-on: ['self-hosted', 'linux']
+analyse:
+runs-on: ubuntu-latest
 
+```
+steps:
+  - uses: actions/checkout@v4
+
+  - uses: actions/setup-python@v5
+    with:
+      python-version: "3.11"
+
+  - name: Install dependencies
+    run: |
+      pip install requests beautifulsoup4 lxml
+
+  - name: Download HTML Report
+    run: |
+      curl -k \
+        -H "Authorization: Basic ${{ secrets.LRE_API_KEY }}" \
+        "${{ github.event.inputs.lre_host }}/loadtest/rest/domains/${{ github.event.inputs.lre_domain }}/projects/${{ github.event.inputs.lre_project }}/Runs/${{ github.event.inputs.run_id }}/Results" \
+        -o Results.xml
+
+  - name: Run Analysis
     env:
-      LRE_HOST:      ${{ github.event.inputs.lre_host }}
-      LRE_DOMAIN:    ${{ github.event.inputs.lre_domain }}
-      LRE_PROJECT:   ${{ github.event.inputs.lre_project }}
-      TEST_ID:       ${{ github.event.inputs.test_id }}
-      INSTANCE_ID:   ${{ github.event.inputs.test_instance_id }}
-      TIMESLOT_MINS: ${{ github.event.inputs.timeslot_minutes }}
-      WAIT_SECS:     ${{ github.event.inputs.wait_seconds }}
-      TREND_ID:      ${{ github.event.inputs.trend_report_id }}
+      AZURE_FOUNDRY_API_KEY: ${{ secrets.AZURE_FOUNDRY_API_KEY }}
+      AZURE_FOUNDRY_ENDPOINT: ${{ secrets.AZURE_FOUNDRY_ENDPOINT }}
+      AZURE_FOUNDRY_DEPLOYMENT: ${{ secrets.AZURE_FOUNDRY_DEPLOYMENT_PRIMARY }}
+      RUN_ID: ${{ github.event.inputs.run_id }}
+    run: |
+      python scripts/analyse_reports.py
 
-    steps:
+  - name: Publish Summary
+    run: |
+      cat analysis_output/summary.md >> $GITHUB_STEP_SUMMARY
 
-      # ── 1. Checkout repo ──────────────────────────────────
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # ── 2. Set up Python ──────────────────────────────────
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Python dependencies
-        run: |
-          pip install --upgrade pip
-          pip install requests beautifulsoup4 lxml
-
-      # ── 3. Trigger LRE test ───────────────────────────────
-      - name: Triggering test in LRE
-        id: trigger_test
-        run: |
-          echo "▶ Authenticating with LRE..."
-          curl -k -v -c cookies.txt \
-            -H "Authorization: Basic ${{ secrets.LRE_API_KEY }}" \
-            "${LRE_HOST}/loadtest/rest/authentication-point/authenticate"
-
-          echo "▶ Creating site session..."
-          curl -k -v -b cookies.txt \
-            -H "Content-Type: application/xml" \
-            "${LRE_HOST}/loadtest/rest/site-session"
-
-          echo "▶ Triggering test run (TestID=${TEST_ID}, InstanceID=${INSTANCE_ID})..."
-          curl -k -v -b cookies.txt \
-            -H "Accept: application/xml" \
-            -H "Content-Type: application/xml" \
-            -d "<Run xmlns=\"http://www.hp.com/PC/REST/API\">
-                  <PostRunAction>Collate And Analyze</PostRunAction>
-                  <TestID>${TEST_ID}</TestID>
-                  <TestInstanceID>${INSTANCE_ID}</TestInstanceID>
-                  <TimeslotDuration>
-                    <Hours>0</Hours>
-                    <Minutes>${TIMESLOT_MINS}</Minutes>
-                  </TimeslotDuration>
-                  <VudsMode>false</VudsMode>
-                </Run>" \
-            "${LRE_HOST}/loadtest/rest/domains/${LRE_DOMAIN}/projects/${LRE_PROJECT}/Runs" \
-            -o package.xml
-
-          echo "▶ Trigger response:"
-          cat package.xml
-
-      # ── 4. Upload trigger logs ────────────────────────────
-      - name: Upload component test logs
-        id: publish-component-test-logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: component-test-logs-${{ github.run_number }}
-          path: |
-            package.xml
-            cookies.txt
-
-      - name: Get data
-        run: |
-          cat package.xml
-          ls -lrt
-
-      # ── 5. Extract Run ID ─────────────────────────────────
-      - name: Get XML Run ID
-        id: get-xml-id
-        uses: mavrosxristoforos/get-xml-info@2.0
-        with:
-          xml-file: 'package.xml'
-          xpath: '//*[local-name()="Run"]/*[local-name()="ID"]'
-
-      - name: Display extracted Run ID
-        run: |
-          echo "Extracted Run ID: ${{ steps.get-xml-id.outputs.info }}"
-          if [ -z "${{ steps.get-xml-id.outputs.info }}" ]; then
-            echo "❌ Run ID is empty — check package.xml above."
-            exit 1
-          fi
-
-      # ── 6. Wait for test to complete ──────────────────────
-      - name: Wait until test completes
-        run: |
-          echo "⏳ Waiting ${WAIT_SECS}s for test to finish..."
-          sleep "${WAIT_SECS}s"
-
-      # ── 7. Fetch SLA status ───────────────────────────────
-      - name: Get SLA status of Run ID
-        run: |
-          curl -k -v -c cookies.txt \
-            -H "Authorization: Basic ${{ secrets.LRE_API_KEY }}" \
-            -H "Accept: application/xml" \
-            -H "Content-Type: application/xml" \
-            "${LRE_HOST}/loadtest/rest/authentication-point/authenticate"
-
-          curl -k -v -b cookies.txt \
-            -H "Accept: application/xml" \
-            -H "Content-Type: application/xml" \
-            "${LRE_HOST}/loadtest/rest/domains/${LRE_DOMAIN}/projects/${LRE_PROJECT}/Runs/${{ steps.get-xml-id.outputs.info }}" \
-            -o SLA.xml
-
-      - name: Get SLA status from response XML
-        run: |
-          cat SLA.xml
-          ls -lrt
-
-      - name: Extract SLA status
-        id: get-sla
-        uses: mavrosxristoforos/get-xml-info@2.0
-        with:
-          xml-file: 'SLA.xml'
-          xpath: '//*[local-name()="Run"]/*[local-name()="RunSLAStatus"]'
-
-      - name: Display extracted SLA status
-        run: |
-          echo "SLA_Status= ${{ steps.get-sla.outputs.info }}"
-
-      # ── 8. Sleep before fetching results ──────────────────
-      - name: Sleep for 10 seconds
-        run: sleep 10s
-
-      # ── 9. Fetch Results XML ──────────────────────────────
-      - name: Run result by Run ID
-        run: |
-          curl -k -v -c cookies.txt \
-            -H "Authorization: Basic ${{ secrets.LRE_API_KEY }}" \
-            -H "Accept: application/xml" \
-            -H "Content-Type: application/xml" \
-            "${LRE_HOST}/loadtest/rest/authentication-point/authenticate"
-
-          curl -k -v -b cookies.txt \
-            -H "Accept: application/xml" \
-            -H "Content-Type: application/xml" \
-            "${LRE_HOST}/loadtest/rest/domains/${LRE_DOMAIN}/projects/${LRE_PROJECT}/Runs/${{ steps.get-xml-id.outputs.info }}/Results" \
-            -o Results.xml
-
-      - name: Get result ID from response XML
-        run: |
-          cat Results.xml
-          ls -lrt
-
-      # ── 10. Extract HTML Report ID (XPath + fallback) ─────
-      - name: Get HTML Report Result ID
-        id: get-xml-html-resultid
-        uses: mavrosxristoforos/get-xml-info@2.0
-        with:
-          xml-file: 'Results.xml'
-          xpath: '//*[local-name()="RunResult"][*[local-name()="Type" and text()="HTML REPORT"]]/*[local-name()="ID"]'
-
-      - name: Display extracted HTML Report ID
-        run: |
-          echo "HTML_ID= ${{ steps.get-xml-html-resultid.outputs.info }}"
-
-      - name: Get all Result IDs (fallback)
-        id: get-xml-resultid
-        if: steps.get-xml-html-resultid.outputs.info == ''
-        uses: mavrosxristoforos/get-xml-info@2.0
-        with:
-          xml-file: 'Results.xml'
-          xpath: '//*[local-name()="RunResult"]/*[local-name()="ID"]'
-
-      - name: Split fallback Result IDs
-        id: split
-        if: steps.get-xml-html-resultid.outputs.info == ''
-        uses: winterjung/split@v2
-        with:
-          msg: '${{ steps.get-xml-resultid.outputs.info }}'
-          separator: ','
-
-      - name: Resolve final HTML Report ID
-        id: html_result_id
-        run: |
-          XPATH_ID="${{ steps.get-xml-html-resultid.outputs.info }}"
-          SPLIT_ID="${{ steps.split.outputs._3 }}"
-          if [ -n "$XPATH_ID" ]; then
-            echo "html_id=${XPATH_ID}" >> $GITHUB_OUTPUT
-            echo "✅ HTML Report ID (XPath) = ${XPATH_ID}"
-          elif [ -n "$SPLIT_ID" ]; then
-            echo "html_id=${SPLIT_ID}" >> $GITHUB_OUTPUT
-            echo "⚠️ HTML Report ID (fallback) = ${SPLIT_ID}"
-          else
-            echo "❌ Could not determine HTML Report ID."
-            exit 1
-          fi
-
-      # ── 11. Download HTML Report ──────────────────────────
-      - name: HTML report from Run ID and Results ID
-        run: |
-          curl -k -v -c cookies.txt \
-            -H "Authorization: Basic ${{ secrets.LRE_API_KEY }}" \
-            -H "Accept: application/xml" \
-            "${LRE_HOST}/loadtest/rest/authentication-point/authenticate"
-
-          curl -k -v -b cookies.txt \
-            -H "Accept: */*" \
-            -H "Accept-Encoding: gzip, deflate, br" \
-            -H "CURLOPT_ENCODING: gzip" \
-            -H "Content-Type: application/zip" \
-            -H "Authorization: Basic ${{ secrets.LRE_API_KEY }}" \
-            "${LRE_HOST}/loadtest/rest/domains/${LRE_DOMAIN}/projects/${LRE_PROJECT}/Runs/${{ steps.get-xml-id.outputs.info }}/Results/${{ steps.html_result_id.outputs.html_id }}/data" \
-            -o HTML_Report.zip
-
-      - name: Unzip HTML Report
-        run: |
-          mkdir -p reports/html
-          unzip -o HTML_Report.zip -d reports/html || echo "⚠️ Unzip issue"
-          ls -lrt reports/html/
-
-      - name: Upload HTML Report
-        id: publish-html-report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: HTMLReport-${{ github.run_number }}
-          path: HTML_Report.zip
-
-      # ── 12. Download Trend Report (only if ID provided) ───
-      - name: Trend report from Trend ID
-        if: env.TREND_ID != ''
-        run: |
-          curl -k -v -c cookies.txt \
-            -H "Authorization: Basic ${{ secrets.LRE_API_KEY }}" \
-            -H "Accept: application/xml" \
-            "${LRE_HOST}/loadtest/rest/authentication-point/authenticate"
-
-          curl -k -v -b cookies.txt \
-            -H "Accept: */*" \
-            -H "Accept-Encoding: gzip, deflate, br" \
-            -H "CURLOPT_ENCODING: gzip" \
-            -H "Content-Type: application/zip" \
-            -H "Authorization: Basic ${{ secrets.LRE_API_KEY }}" \
-            "${LRE_HOST}/loadtest/rest/domains/${LRE_DOMAIN}/projects/${LRE_PROJECT}/TrendReports/${TREND_ID}/data" \
-            -o Trend_Report.zip
-
-      - name: Unzip Trend Report
-        if: env.TREND_ID != ''
-        run: |
-          mkdir -p reports/trend
-          unzip -o Trend_Report.zip -d reports/trend || echo "⚠️ Unzip issue"
-          ls -lrt reports/trend/
-
-      - name: Upload Trend Report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: TrendReport-${{ github.run_number }}
-          path: Trend_Report.zip
-
-      # ── 13. Azure AI Foundry Analysis ─────────────────────
-      - name: Analyse reports with Azure AI Foundry
-        id: ai_analysis
-        env:
-          AZURE_FOUNDRY_API_KEY:      ${{ secrets.AZURE_FOUNDRY_API_KEY }}
-          PRIMARY_DEPLOYMENT:         ${{ secrets.AZURE_FOUNDRY_DEPLOYMENT_PRIMARY }}
-          SECONDARY_DEPLOYMENT:       ${{ secrets.AZURE_FOUNDRY_DEPLOYMENT_SECONDARY }}
-          SLA_STATUS:                 ${{ steps.get-sla.outputs.info }}
-          RUN_ID:                     ${{ steps.get-xml-id.outputs.info }}
-          HTML_REPORT_DIR:            reports/html
-          TREND_REPORT_DIR:           reports/trend
-          GITHUB_RUN_NUMBER:          ${{ github.run_number }}
-        run: python scripts/analyse_reports.py
-
-      # ── 14. Print analysis in logs ────────────────────────
-      - name: Show analysis result
-        run: |
-          echo "=================================================="
-          echo "📊 LRE PERFORMANCE ANALYSIS"
-          echo "=================================================="
-          cat analysis_output/summary.md
-          echo "=================================================="
-
-      # ── 15. Publish to GitHub Job Summary ─────────────────
-      - name: Write analysis to GitHub Job Summary
-        run: |
-          echo "## 📊 LRE Performance Analysis – Run #${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| LRE Run ID | \`${{ steps.get-xml-id.outputs.info }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| SLA Status | ${{ steps.get-sla.outputs.info }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Test ID | \`${TEST_ID}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Instance ID | \`${INSTANCE_ID}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Project | \`${LRE_PROJECT}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          cat analysis_output/summary.md >> $GITHUB_STEP_SUMMARY
-
-      # ── 16. Upload AI Analysis artifact ───────────────────
-      - name: Upload AI Analysis
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: AI-Analysis-${{ github.run_number }}
-          path: analysis_output/
-          retention-days: 30
-
-      # ── 17. Upload raw LRE XMLs ───────────────────────────
-      - name: Upload raw LRE XMLs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: LRE-XMLs-${{ github.run_number }}
-          path: |
-            package.xml
-            SLA.xml
-            Results.xml
-          retention-days: 14
+  - name: Upload Analysis
+    uses: actions/upload-artifact@v4
+    with:
+      name: AI-Analysis
+      path: analysis_output
+```
