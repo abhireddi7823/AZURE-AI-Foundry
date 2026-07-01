@@ -1,0 +1,58 @@
+name: LRE – Find Test Instance ID
+
+on:
+  workflow_dispatch:
+    inputs:
+      lre_host:
+        description: 'LRE server URL'
+        required: true
+        default: 'https://lre.edb.com'
+      lre_domain:
+        description: 'LRE Domain'
+        required: true
+        default: 'FS'
+      lre_project:
+        description: 'LRE Project name'
+        required: true
+        default: 'Payment_Initiation'
+      test_id:
+        description: 'Test ID to look up instances for'
+        required: true
+        default: '4026'
+
+jobs:
+  find_instance_id:
+    name: List Test Instances
+    runs-on: ['self-hosted', 'linux']
+
+    steps:
+      - name: Authenticate and fetch test instances
+        run: |
+          LRE_HOST="${{ github.event.inputs.lre_host }}"
+          LRE_DOMAIN="${{ github.event.inputs.lre_domain }}"
+          LRE_PROJECT="${{ github.event.inputs.lre_project }}"
+          TEST_ID="${{ github.event.inputs.test_id }}"
+
+          echo "▶ Authenticating..."
+          curl -k -s -c cookies.txt \
+            -H "Authorization: Basic ${{ secrets.LRE_API_KEY }}" \
+            "${LRE_HOST}/loadtest/rest/authentication-point/authenticate"
+
+          echo "▶ Fetching test details (includes instances) for Test ID ${TEST_ID}..."
+          curl -k -s -b cookies.txt \
+            -H "Accept: application/xml" \
+            "${LRE_HOST}/loadtest/rest/domains/${LRE_DOMAIN}/projects/${LRE_PROJECT}/tests/${TEST_ID}" \
+            -o test_details.xml
+
+          echo "=================================================="
+          echo "📄  Raw response (look for TestInstance / ID tags):"
+          echo "=================================================="
+          cat test_details.xml
+          echo "=================================================="
+
+      - name: Upload raw response for inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-instance-lookup
+          path: test_details.xml
