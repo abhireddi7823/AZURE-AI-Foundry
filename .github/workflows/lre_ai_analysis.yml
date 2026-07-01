@@ -1,68 +1,12 @@
 name: LRE AI Analysis
 
 on:
-workflow_dispatch:
-inputs:
-lre_host:
-description: LRE Host
-required: true
-default: https://lre.edb.com
-
-```
-  lre_domain:
-    description: LRE Domain
-    required: true
-    default: FS
-
-  lre_project:
-    description: LRE Project
-    required: true
-    default: Payment_Initiation
-
-  run_id:
-    description: Existing LRE Run ID
-    required: true
-```
+  workflow_dispatch:
 
 jobs:
-analyse:
-runs-on: ubuntu-latest
+  test:
+    runs-on: ubuntu-latest
 
-```
-steps:
-  - uses: actions/checkout@v4
-
-  - uses: actions/setup-python@v5
-    with:
-      python-version: "3.11"
-
-  - name: Install dependencies
-    run: |
-      pip install requests beautifulsoup4 lxml
-
-  - name: Download HTML Report
-    run: |
-      curl -k \
-        -H "Authorization: Basic ${{ secrets.LRE_API_KEY }}" \
-        "${{ github.event.inputs.lre_host }}/loadtest/rest/domains/${{ github.event.inputs.lre_domain }}/projects/${{ github.event.inputs.lre_project }}/Runs/${{ github.event.inputs.run_id }}/Results" \
-        -o Results.xml
-
-  - name: Run Analysis
-    env:
-      AZURE_FOUNDRY_API_KEY: ${{ secrets.AZURE_FOUNDRY_API_KEY }}
-      AZURE_FOUNDRY_ENDPOINT: ${{ secrets.AZURE_FOUNDRY_ENDPOINT }}
-      AZURE_FOUNDRY_DEPLOYMENT: ${{ secrets.AZURE_FOUNDRY_DEPLOYMENT_PRIMARY }}
-      RUN_ID: ${{ github.event.inputs.run_id }}
-    run: |
-      python scripts/analyse_reports.py
-
-  - name: Publish Summary
-    run: |
-      cat analysis_output/summary.md >> $GITHUB_STEP_SUMMARY
-
-  - name: Upload Analysis
-    uses: actions/upload-artifact@v4
-    with:
-      name: AI-Analysis
-      path: analysis_output
-```
+    steps:
+      - name: Test
+        run: echo "Workflow loaded successfully"
