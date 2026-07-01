@@ -1,105 +1,31 @@
-import os
-import requests
-from pathlib import Path
-import urllib3
+name: LRE AI Analysis
 
-urllib3.disable_warnings()
+on:
+  workflow_dispatch:
 
-results = []
+jobs:
+  analyse:
+    runs-on: ubuntu-latest
 
-# =====================================================
-# Secret Validation
-# =====================================================
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-api_key = os.getenv("AZURE_FOUNDRY_API_KEY")
-endpoint = os.getenv("AZURE_FOUNDRY_ENDPOINT")
-primary = os.getenv("AZURE_FOUNDRY_DEPLOYMENT_PRIMARY")
-secondary = os.getenv("AZURE_FOUNDRY_DEPLOYMENT_SECONDARY")
-lre_key = os.getenv("LRE_API_KEY")
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-results.append("## Secret Validation")
-results.append(f"AZURE_FOUNDRY_API_KEY: {'✅ Found' if api_key else '❌ Missing'}")
-results.append(f"AZURE_FOUNDRY_ENDPOINT: {'✅ Found' if endpoint else '❌ Missing'}")
-results.append(f"PRIMARY MODEL: {'✅ Found' if primary else '❌ Missing'}")
-results.append(f"SECONDARY MODEL: {'✅ Found' if secondary else '❌ Missing'}")
-results.append(f"LRE_API_KEY: {'✅ Found' if lre_key else '❌ Missing'}")
+      - name: Run Python Script
+        env:
+          AZURE_FOUNDRY_API_KEY: ${{ secrets.AZURE_FOUNDRY_API_KEY }}
+          AZURE_FOUNDRY_ENDPOINT: ${{ secrets.AZURE_FOUNDRY_ENDPOINT }}
+          AZURE_FOUNDRY_DEPLOYMENT_PRIMARY: ${{ secrets.AZURE_FOUNDRY_DEPLOYMENT_PRIMARY }}
+          AZURE_FOUNDRY_DEPLOYMENT_SECONDARY: ${{ secrets.AZURE_FOUNDRY_DEPLOYMENT_SECONDARY }}
+          LRE_API_KEY: ${{ secrets.LRE_API_KEY }}
+        run: |
+          python scripts/analyse_reports.py
 
-# =====================================================
-# Azure AI Foundry Test
-# =====================================================
-
-results.append("")
-results.append("## Azure AI Foundry Test")
-
-try:
-    headers = {
-        "api-key": api_key,
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "model": primary,
-        "messages": [
-            {
-                "role": "user",
-                "content": "Reply with exactly Azure AI Foundry connection successful"
-            }
-        ],
-        "temperature": 0
-    }
-
-    response = requests.post(
-        f"{endpoint}/chat/completions",
-        headers=headers,
-        json=payload,
-        timeout=60
-    )
-
-    results.append(f"Status Code: {response.status_code}")
-
-    if response.status_code == 200:
-        answer = response.json()["choices"][0]["message"]["content"]
-        results.append(f"Response: {answer}")
-    else:
-        results.append(f"Error: {response.text}")
-
-except Exception as ex:
-    results.append(f"Exception: {str(ex)}")
-
-# =====================================================
-# LRE Connectivity Test
-# =====================================================
-
-results.append("")
-results.append("## LRE Connectivity Test")
-
-try:
-    lre_url = "https://lre.edb.com"
-
-    response = requests.get(
-        lre_url,
-        verify=False,
-        timeout=20
-    )
-
-    results.append(f"LRE Status Code: {response.status_code}")
-    results.append(f"LRE Final URL: {response.url}")
-
-except Exception as ex:
-    results.append(f"LRE Exception: {str(ex)}")
-
-# =====================================================
-# Write Summary
-# =====================================================
-
-Path("analysis_output").mkdir(exist_ok=True)
-
-summary = "# LRE AI Connectivity Report\n\n"
-
-for item in results:
-    summary += item + "\n\n"
-
-with open("analysis_output/summary.md", "w", encoding="utf-8") as f:
-    f.write(summary)
-
-print(summary)
+      - name: Publish Summary
+        run: |
+          cat analysis_output/summary.md >> $GITHUB_STEP_SUMMARY
