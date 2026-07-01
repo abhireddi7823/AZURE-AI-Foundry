@@ -16,7 +16,12 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Run Python Script
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Run LRE Connectivity Test
         env:
           AZURE_FOUNDRY_API_KEY: ${{ secrets.AZURE_FOUNDRY_API_KEY }}
           AZURE_FOUNDRY_ENDPOINT: ${{ secrets.AZURE_FOUNDRY_ENDPOINT }}
@@ -29,3 +34,9 @@ jobs:
       - name: Publish Summary
         run: |
           cat analysis_output/summary.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: LRE-Test-Results
+          path: analysis_output/
