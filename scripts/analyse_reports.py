@@ -1,120 +1,93 @@
-import os
-import requests
 from pathlib import Path
+import requests
+import urllib3
+import socket
+
+urllib3.disable_warnings()
+
+output_dir = Path("analysis_output")
+output_dir.mkdir(exist_ok=True)
 
 results = []
 
-# =====================================================
-# Secret Validation
-# =====================================================
-
-api_key = os.getenv("AZURE_FOUNDRY_API_KEY")
-endpoint = os.getenv("AZURE_FOUNDRY_ENDPOINT")
-primary = os.getenv("AZURE_FOUNDRY_DEPLOYMENT_PRIMARY")
-secondary = os.getenv("AZURE_FOUNDRY_DEPLOYMENT_SECONDARY")
-lre_key = os.getenv("LRE_API_KEY")
-lre_host = os.getenv("LRE_HOST")
-
-results.append("## Secret Validation")
-
-results.append(
-    f"AZURE_FOUNDRY_API_KEY: {'✅ Found' if api_key else '❌ Missing'}"
-)
-results.append(
-    f"AZURE_FOUNDRY_ENDPOINT: {'✅ Found' if endpoint else '❌ Missing'}"
-)
-results.append(
-    f"PRIMARY MODEL: {'✅ Found' if primary else '❌ Missing'}"
-)
-results.append(
-    f"SECONDARY MODEL: {'✅ Found' if secondary else '❌ Missing'}"
-)
-results.append(
-    f"LRE_API_KEY: {'✅ Found' if lre_key else '❌ Missing'}"
-)
-
-# =====================================================
-# Azure AI Foundry Test
-# =====================================================
-
+results.append("# LRE Connectivity Report")
 results.append("")
-results.append("## Azure AI Foundry Test")
+
+# =====================================================
+# DNS TEST
+# =====================================================
 
 try:
-
-    if not endpoint:
-        raise Exception("AZURE_FOUNDRY_ENDPOINT secret not configured")
-
-    headers = {
-        "api-key": api_key,
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "model": primary,
-        "messages": [
-            {
-                "role": "user",
-                "content": "Reply with exactly Azure AI Foundry connection successful"
-            }
-        ],
-        "temperature": 0
-    }
-
-    response = requests.post(
-        f"{endpoint}/chat/completions",
-        headers=headers,
-        json=payload,
-        timeout=60
-    )
-
-    results.append(f"Status Code: {response.status_code}")
-
-    if response.status_code == 200:
-        answer = response.json()["choices"][0]["message"]["content"]
-        results.append(f"Response: {answer}")
-    else:
-        results.append(f"Error: {response.text}")
-
-except Exception as ex:
-    results.append(f"Exception: {str(ex)}")
-
-# =====================================================
-# LRE Connectivity Test
-# =====================================================
+    ip = socket.gethostbyname("lre.edb.com")
+    results.append(f"DNS Resolution: SUCCESS")
+    results.append(f"Resolved IP: {ip}")
+except Exception as e:
+    results.append(f"DNS Resolution Failed: {e}")
 
 results.append("")
-results.append("## LRE Connectivity Test")
+
+# =====================================================
+# HOME PAGE TEST
+# =====================================================
 
 try:
-
-    headers = {
-        "Authorization": f"Basic {lre_key}"
-    }
-
-    response = requests.get(
-        f"{lre_host}/loadtest/rest/domains",
-        headers=headers,
-        verify=False,
-        timeout=60
+    r = requests.get(
+        "https://lre.edb.com",
+        timeout=20,
+        verify=False
     )
 
-    results.append(f"Status Code: {response.status_code}")
-    results.append(f"Response Length: {len(response.text)}")
+    results.append(f"Homepage Status Code: {r.status_code}")
+    results.append(f"Homepage URL: {r.url}")
 
-except Exception as ex:
-    results.append(f"Exception: {str(ex)}")
+except Exception as e:
+    results.append(f"Homepage Exception: {e}")
+
+results.append("")
 
 # =====================================================
-# Generate Summary
+# LRE UI TEST
 # =====================================================
 
-Path("analysis_output").mkdir(exist_ok=True)
+try:
+    r = requests.get(
+        "https://lre.edb.com/Loadtest/pcx/app/",
+        timeout=20,
+        verify=False
+    )
 
-summary = "# LRE AI Connectivity Report\n\n"
+    results.append(f"LRE UI Status Code: {r.status_code}")
+    results.append(f"LRE UI URL: {r.url}")
 
-for item in results:
-    summary += f"{item}\n\n"
+except Exception as e:
+    results.append(f"LRE UI Exception: {e}")
+
+results.append("")
+
+# =====================================================
+# REST API TEST
+# =====================================================
+
+try:
+    r = requests.get(
+        "https://lre.edb.com/loadtest/rest/domains",
+        timeout=20,
+        verify=False
+    )
+
+    results.append(f"REST API Status Code: {r.status_code}")
+    results.append(f"REST API Response Length: {len(r.text)}")
+
+except Exception as e:
+    results.append(f"REST API Exception: {e}")
+
+results.append("")
+
+# =====================================================
+# SAVE REPORT
+# =====================================================
+
+summary = "\n".join(results)
 
 with open("analysis_output/summary.md", "w", encoding="utf-8") as f:
     f.write(summary)
