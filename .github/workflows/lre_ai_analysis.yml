@@ -1,19 +1,43 @@
-- name: Install Dependencies
-  run: |
-    pip install -r requirements.txt
+name: LRE AI Analysis
 
-- name: Azure + LRE Connectivity Test
-  env:
-    AZURE_FOUNDRY_API_KEY: ${{ secrets.AZURE_FOUNDRY_API_KEY }}
-    AZURE_FOUNDRY_ENDPOINT: ${{ secrets.AZURE_FOUNDRY_ENDPOINT }}
-    AZURE_FOUNDRY_DEPLOYMENT: ${{ secrets.AZURE_FOUNDRY_DEPLOYMENT_PRIMARY }}
+on:
+  workflow_dispatch:
 
-    LRE_API_KEY: ${{ secrets.LRE_API_KEY }}
-    LRE_HOST: https://lre.edb.com
+jobs:
+  analyse:
+    runs-on: ubuntu-latest
 
-  run: |
-    python scripts/analyse_reports.py
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-- name: Publish Summary
-  run: |
-    cat analysis_output/summary.md >> $GITHUB_STEP_SUMMARY
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run Connectivity Test
+        env:
+          AZURE_FOUNDRY_API_KEY: ${{ secrets.AZURE_FOUNDRY_API_KEY }}
+          AZURE_FOUNDRY_ENDPOINT: ${{ secrets.AZURE_FOUNDRY_ENDPOINT }}
+          AZURE_FOUNDRY_DEPLOYMENT: ${{ secrets.AZURE_FOUNDRY_DEPLOYMENT_PRIMARY }}
+
+          LRE_API_KEY: ${{ secrets.LRE_API_KEY }}
+          LRE_HOST: https://lre.edb.com
+
+        run: |
+          python scripts/analyse_reports.py
+
+      - name: Publish Summary
+        run: |
+          cat analysis_output/summary.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Analysis
+        uses: actions/upload-artifact@v4
+        with:
+          name: Connectivity-Test
+          path: analysis_output/
