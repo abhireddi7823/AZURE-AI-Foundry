@@ -1,23 +1,19 @@
-name: LRE AI Analysis
+- name: Install Dependencies
+  run: |
+    pip install -r requirements.txt
 
-on:
-  workflow_dispatch:
+- name: Azure + LRE Connectivity Test
+  env:
+    AZURE_FOUNDRY_API_KEY: ${{ secrets.AZURE_FOUNDRY_API_KEY }}
+    AZURE_FOUNDRY_ENDPOINT: ${{ secrets.AZURE_FOUNDRY_ENDPOINT }}
+    AZURE_FOUNDRY_DEPLOYMENT: ${{ secrets.AZURE_FOUNDRY_DEPLOYMENT_PRIMARY }}
 
-jobs:
-  analyse:
-    runs-on: ubuntu-latest
+    LRE_API_KEY: ${{ secrets.LRE_API_KEY }}
+    LRE_HOST: https://lre.edb.com
 
-    steps:
-      - uses: actions/checkout@v4
+  run: |
+    python scripts/analyse_reports.py
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Run Analysis Script
-        run: |
-          python scripts/analyse_reports.py
-
-      - name: Publish Summary
-        run: |
-          cat analysis_output/summary.md >> $GITHUB_STEP_SUMMARY
+- name: Publish Summary
+  run: |
+    cat analysis_output/summary.md >> $GITHUB_STEP_SUMMARY
