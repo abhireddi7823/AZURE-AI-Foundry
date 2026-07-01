@@ -1,42 +1,48 @@
-name: LRE AI Analysis
+name: LRE Authentication Test
 
 on:
   workflow_dispatch:
 
 jobs:
-  analyse:
-    runs-on: ubuntu-latest
+  lre-auth:
+    runs-on: [ 'self-hosted', 'linux' ]
 
     steps:
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install Dependencies
+      - name: Authenticate to LRE
         run: |
-          python -m pip install --upgrade pip
-          pip install requests
+          curl -k -v \
+          -c cookies.txt \
+          -H "Authorization: Basic ${{ secrets.LRE_API_KEY }}" \
+          "https://lre.edb.com/loadtest/rest/authentication-point/authenticate"
 
-      - name: Run LRE Connectivity Test
-        env:
-          AZURE_FOUNDRY_API_KEY: ${{ secrets.AZURE_FOUNDRY_API_KEY }}
-          AZURE_FOUNDRY_ENDPOINT: ${{ secrets.AZURE_FOUNDRY_ENDPOINT }}
-          AZURE_FOUNDRY_DEPLOYMENT_PRIMARY: ${{ secrets.AZURE_FOUNDRY_DEPLOYMENT_PRIMARY }}
-          AZURE_FOUNDRY_DEPLOYMENT_SECONDARY: ${{ secrets.AZURE_FOUNDRY_DEPLOYMENT_SECONDARY }}
-          LRE_API_KEY: ${{ secrets.LRE_API_KEY }}
+      - name: Create Site Session
         run: |
-          python scripts/analyse_reports.py
+          curl -k -v \
+          -b cookies.txt \
+          -H "Content-Type: application/xml" \
+          "https://lre.edb.com/loadtest/rest/site-session"
 
-      - name: Publish Summary
+      - name: Get Domains
         run: |
-          cat analysis_output/summary.md >> $GITHUB_STEP_SUMMARY
+          curl -k -v \
+          -b cookies.txt \
+          -H "Accept: application/xml" \
+          "https://lre.edb.com/loadtest/rest/domains" \
+          -o domains.xml
 
-      - name: Upload Results
+      - name: Display Domains Response
+        run: |
+          echo "===== DOMAINS.XML ====="
+          cat domains.xml
+
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: LRE-Test-Results
-          path: analysis_output/
+          name: lre-auth-results
+          path: |
+            cookies.txt
+            domains.xml
