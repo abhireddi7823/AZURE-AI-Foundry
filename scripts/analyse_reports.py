@@ -4,12 +4,46 @@ from pathlib import Path
 
 results = []
 
-# ---------------- Azure Test ----------------
+# =====================================================
+# Secret Validation
+# =====================================================
+
+api_key = os.getenv("AZURE_FOUNDRY_API_KEY")
+endpoint = os.getenv("AZURE_FOUNDRY_ENDPOINT")
+primary = os.getenv("AZURE_FOUNDRY_DEPLOYMENT_PRIMARY")
+secondary = os.getenv("AZURE_FOUNDRY_DEPLOYMENT_SECONDARY")
+lre_key = os.getenv("LRE_API_KEY")
+lre_host = os.getenv("LRE_HOST")
+
+results.append("## Secret Validation")
+
+results.append(
+    f"AZURE_FOUNDRY_API_KEY: {'✅ Found' if api_key else '❌ Missing'}"
+)
+results.append(
+    f"AZURE_FOUNDRY_ENDPOINT: {'✅ Found' if endpoint else '❌ Missing'}"
+)
+results.append(
+    f"PRIMARY MODEL: {'✅ Found' if primary else '❌ Missing'}"
+)
+results.append(
+    f"SECONDARY MODEL: {'✅ Found' if secondary else '❌ Missing'}"
+)
+results.append(
+    f"LRE_API_KEY: {'✅ Found' if lre_key else '❌ Missing'}"
+)
+
+# =====================================================
+# Azure AI Foundry Test
+# =====================================================
+
+results.append("")
+results.append("## Azure AI Foundry Test")
 
 try:
-    api_key = os.environ["AZURE_FOUNDRY_API_KEY"]
-    endpoint = os.environ["AZURE_FOUNDRY_ENDPOINT"]
-    deployment = os.environ["AZURE_FOUNDRY_DEPLOYMENT"]
+
+    if not endpoint:
+        raise Exception("AZURE_FOUNDRY_ENDPOINT secret not configured")
 
     headers = {
         "api-key": api_key,
@@ -17,11 +51,11 @@ try:
     }
 
     payload = {
-        "model": deployment,
+        "model": primary,
         "messages": [
             {
                 "role": "user",
-                "content": "Reply with Azure AI Foundry connection successful"
+                "content": "Reply with exactly Azure AI Foundry connection successful"
             }
         ],
         "temperature": 0
@@ -34,25 +68,28 @@ try:
         timeout=60
     )
 
-    results.append(f"Azure Status Code: {response.status_code}")
+    results.append(f"Status Code: {response.status_code}")
 
     if response.status_code == 200:
         answer = response.json()["choices"][0]["message"]["content"]
-        results.append(f"Azure Response: {answer}")
+        results.append(f"Response: {answer}")
     else:
-        results.append(f"Azure Error: {response.text}")
+        results.append(f"Error: {response.text}")
 
 except Exception as ex:
-    results.append(f"Azure Exception: {str(ex)}")
+    results.append(f"Exception: {str(ex)}")
 
-# ---------------- LRE Test ----------------
+# =====================================================
+# LRE Connectivity Test
+# =====================================================
+
+results.append("")
+results.append("## LRE Connectivity Test")
 
 try:
-    lre_host = os.environ["LRE_HOST"]
-    lre_api_key = os.environ["LRE_API_KEY"]
 
     headers = {
-        "Authorization": f"Basic {lre_api_key}"
+        "Authorization": f"Basic {lre_key}"
     }
 
     response = requests.get(
@@ -62,22 +99,24 @@ try:
         timeout=60
     )
 
-    results.append(f"LRE Status Code: {response.status_code}")
-    results.append(f"LRE Response Length: {len(response.text)}")
+    results.append(f"Status Code: {response.status_code}")
+    results.append(f"Response Length: {len(response.text)}")
 
 except Exception as ex:
-    results.append(f"LRE Exception: {str(ex)}")
+    results.append(f"Exception: {str(ex)}")
 
-# ---------------- Output ----------------
+# =====================================================
+# Generate Summary
+# =====================================================
 
 Path("analysis_output").mkdir(exist_ok=True)
 
-summary = "# Connectivity Test Results\n\n"
+summary = "# LRE AI Connectivity Report\n\n"
 
 for item in results:
-    summary += f"- {item}\n"
+    summary += f"{item}\n\n"
 
-with open("analysis_output/summary.md", "w") as f:
+with open("analysis_output/summary.md", "w", encoding="utf-8") as f:
     f.write(summary)
 
 print(summary)
