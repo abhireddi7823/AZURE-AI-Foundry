@@ -2,9 +2,11 @@ import os
 import requests
 from pathlib import Path
 
-output = []
+results = []
 
-# ---------------- Azure Test ----------------
+# -------------------------
+# Azure AI Foundry Test
+# -------------------------
 
 try:
     api_key = os.environ["AZURE_FOUNDRY_API_KEY"]
@@ -27,25 +29,27 @@ try:
         "temperature": 0
     }
 
-    r = requests.post(
+    response = requests.post(
         f"{endpoint}/chat/completions",
         headers=headers,
         json=payload,
         timeout=60
     )
 
-    output.append(f"Azure Status Code: {r.status_code}")
+    results.append(f"Azure Status Code: {response.status_code}")
 
-    if r.status_code == 200:
-        answer = r.json()["choices"][0]["message"]["content"]
-        output.append(f"Azure Result: {answer}")
+    if response.status_code == 200:
+        answer = response.json()["choices"][0]["message"]["content"]
+        results.append(f"Azure Response: {answer}")
     else:
-        output.append(f"Azure Error: {r.text}")
+        results.append(f"Azure Error: {response.text}")
 
 except Exception as e:
-    output.append(f"Azure Exception: {e}")
+    results.append(f"Azure Exception: {str(e)}")
 
-# ---------------- LRE Test ----------------
+# -------------------------
+# LRE Connectivity Test
+# -------------------------
 
 try:
     lre_host = os.environ["LRE_HOST"]
@@ -55,26 +59,31 @@ try:
         "Authorization": f"Basic {lre_api_key}"
     }
 
-    r = requests.get(
+    response = requests.get(
         f"{lre_host}/loadtest/rest/domains",
         headers=headers,
         verify=False,
         timeout=60
     )
 
-    output.append(f"LRE Status Code: {r.status_code}")
-    output.append(f"LRE Response Length: {len(r.text)}")
+    results.append(f"LRE Status Code: {response.status_code}")
+    results.append(f"LRE Response Size: {len(response.text)}")
 
 except Exception as e:
-    output.append(f"LRE Exception: {e}")
+    results.append(f"LRE Exception: {str(e)}")
 
-# ---------------- Summary ----------------
+# -------------------------
+# Write Summary
+# -------------------------
 
-Path("analysis_output").mkdir(exist_ok=True)
+output_dir = Path("analysis_output")
+output_dir.mkdir(exist_ok=True)
 
-with open("analysis_output/summary.md", "w") as f:
-    f.write("# Connectivity Test\n\n")
-    for line in output:
-        f.write(f"- {line}\n")
+summary = "# Connectivity Test Results\n\n"
 
-print("\n".join(output))
+for item in results:
+    summary += f"- {item}\n"
+
+(output_dir / "summary.md").write_text(summary)
+
+print(summary)
