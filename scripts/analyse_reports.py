@@ -4,9 +4,7 @@ from pathlib import Path
 
 results = []
 
-# -------------------------
-# Azure AI Foundry Test
-# -------------------------
+# ---------------- Azure Test ----------------
 
 try:
     api_key = os.environ["AZURE_FOUNDRY_API_KEY"]
@@ -44,12 +42,10 @@ try:
     else:
         results.append(f"Azure Error: {response.text}")
 
-except Exception as e:
-    results.append(f"Azure Exception: {str(e)}")
+except Exception as ex:
+    results.append(f"Azure Exception: {str(ex)}")
 
-# -------------------------
-# LRE Connectivity Test
-# -------------------------
+# ---------------- LRE Test ----------------
 
 try:
     lre_host = os.environ["LRE_HOST"]
@@ -67,23 +63,21 @@ try:
     )
 
     results.append(f"LRE Status Code: {response.status_code}")
-    results.append(f"LRE Response Size: {len(response.text)}")
+    results.append(f"LRE Response Length: {len(response.text)}")
 
-except Exception as e:
-    results.append(f"LRE Exception: {str(e)}")
+except Exception as ex:
+    results.append(f"LRE Exception: {str(ex)}")
 
-# -------------------------
-# Write Summary
-# -------------------------
+# ---------------- Output ----------------
 
-output_dir = Path("analysis_output")
-output_dir.mkdir(exist_ok=True)
+Path("analysis_output").mkdir(exist_ok=True)
 
 summary = "# Connectivity Test Results\n\n"
 
 for item in results:
     summary += f"- {item}\n"
 
-(output_dir / "summary.md").write_text(summary)
+with open("analysis_output/summary.md", "w") as f:
+    f.write(summary)
 
 print(summary)
